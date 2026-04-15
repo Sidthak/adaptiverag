@@ -7,8 +7,7 @@ Show Image
 A smart AI assistant that thinks before answering. It figures out whether to search the web, your documents, or both — then grades the results before responding.
 
 📸 Screenshots
-Web Search
-Show Image
+![Web Search](screenshots/web.png)
 
 ✨ Features
 
