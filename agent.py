@@ -105,6 +105,7 @@ to answer this question: "{state['question']}"?
 Context:
 {context[:2000]}
 
+Be strict. If the context does not DIRECTLY answer the question with specific facts, reply 'insufficient'.
 Reply with only: 'sufficient' or 'insufficient'"""
 
     response = llm.invoke([HumanMessage(content=grade_prompt)])
@@ -193,7 +194,7 @@ def route_to_search(state: AgentState) -> str:
 
 
 def build_graph():
-    """Build the LangGraph agent graph."""
+    """Build the LangGraph agent graph with real HITL interrupt."""
     workflow = StateGraph(AgentState)
 
     workflow.add_node("router", route_node)
@@ -231,15 +232,32 @@ def build_graph():
     workflow.add_edge("generate", END)
 
     memory = MemorySaver()
-    return workflow.compile(checkpointer=memory)
+    return workflow.compile(
+        checkpointer=memory,
+        interrupt_before=["clarify"]  # REAL HITL — graph pauses before clarify node
+    )
 
 
 @traceable
-def run_agent(question: str, thread_id: str = "default") -> dict:
-    """Run the agent on a question."""
+def run_agent(question: str, thread_id: str = "default", human_input: str = None) -> dict:
+    """
+    Run the agent on a question.
+    If human_input is provided, resume a paused graph with the user's answer.
+    """
     graph = build_graph()
     config = {"configurable": {"thread_id": thread_id}}
 
+    # If resuming after HITL pause
+    if human_input:
+        print(f"▶️  Resuming with human input: {human_input}")
+        resume_state = {
+            "clarification_question": human_input,
+            "needs_clarification": False,
+        }
+        result = graph.invoke(resume_state, config)
+        return result
+
+    # Fresh run
     initial_state = {
         "question": question,
         "route": "",
@@ -253,4 +271,14 @@ def run_agent(question: str, thread_id: str = "default") -> dict:
     }
 
     result = graph.invoke(initial_state, config)
+
+    # Check if graph is paused waiting for human input
+    state = graph.get_state(config)
+    if state.next and "clarify" in state.next:
+        print("⏸️  Graph paused — waiting for human input")
+        result["graph_paused"] = True
+        result["needs_clarification"] = True
+    else:
+        result["graph_paused"] = False
+
     return result
